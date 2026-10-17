@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.4] - 2026-10-17
+
+### Added
+
+- **fzf**: `install_fzf()` — brew on macOS, apt/dnf with passwordless sudo, else the `fzf-<ver>-linux_<arch>.tar.gz` GitHub release into `~/.local/bin` (`FZF_VERSION` 0.74.5). Included in `--check` and the post-install list.
+
+### Fixed
+
+- **zsh on arm64 without sudo**: the `.deb` fallback ran only on `x86_64`, so aarch64 hosts without sudo failed with "zsh is required but couldn't be installed". It now also runs on `aarch64`, pulling `arm64` packages from `ports.ubuntu.com/ubuntu-ports` (arm64 debs are not on `archive.ubuntu.com`). Verified on Ubuntu 24.04 aarch64.
+- **yazi without unzip**: hosts lacking `unzip` and sudo skipped yazi; extraction now falls back to `python3 -m zipfile`.
+
 ## [1.4.3] - 2026-07-30
 
 ### Added
