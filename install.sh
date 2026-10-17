@@ -15,7 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-INSTALL_VERSION="1.4.3"
+INSTALL_VERSION="1.4.4"
 INSTALL_STATE_DIR="${HOME}/.config/shell"
 INSTALL_STATE_FILE="${INSTALL_STATE_DIR}/install-version"
 
@@ -32,6 +32,7 @@ YAZI_VERSION="v26.1.22"
 WEZTERM_VERSION="20240203-110809-5046fc22"
 CHAFA_VERSION="1.18.1"
 GH_VERSION="2.96.0"
+FZF_VERSION="0.74.5"
 
 # Flags (set by parse_args)
 CHECK_MODE=false
@@ -791,8 +792,8 @@ install_yazi() {
 
   if ! need_cmd unzip; then
     try_install_pkgs_no_password unzip
-    if ! need_cmd unzip; then
-      warn "unzip not available. Cannot extract yazi. Skipping."
+    if ! need_cmd unzip && ! need_cmd python3; then
+      warn "Neither unzip nor python3 available. Cannot extract yazi. Skipping."
       return 0
     fi
   fi
@@ -819,7 +820,11 @@ install_yazi() {
   trap 'rm -rf "$tmpdir"' RETURN
 
   download_to "$url" "${tmpdir}/yazi.zip"
-  unzip -q "${tmpdir}/yazi.zip" -d "$tmpdir"
+  if need_cmd unzip; then
+    unzip -q "${tmpdir}/yazi.zip" -d "$tmpdir"
+  else
+    python3 -m zipfile -e "${tmpdir}/yazi.zip" "$tmpdir"
+  fi
 
   mkdir -p "${HOME}/.local/bin"
   cp "${tmpdir}/yazi-${target}/yazi" "${HOME}/.local/bin/yazi"
@@ -919,6 +924,57 @@ install_gh() {
   rm -rf "$tmpdir"
   trap - RETURN
   log "gh ${GH_VERSION} installed to ~/.local/bin/ (run 'gh auth login' to authenticate)"
+}
+
+install_fzf() {
+  if need_cmd fzf; then
+    log "fzf already installed: $(fzf --version 2>/dev/null)"
+    return 0
+  fi
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if need_cmd brew; then
+      log "Installing fzf via brew"
+      brew install fzf >/dev/null || warn "brew install fzf failed (continuing)."
+    else
+      warn "Homebrew not found. Skipping fzf."
+    fi
+    return 0
+  fi
+
+  if have_passwordless_sudo; then
+    if need_cmd apt-get; then
+      sudo -n apt-get install -y fzf >/dev/null 2>&1 && { log "fzf installed via apt."; return 0; } || true
+    elif need_cmd dnf; then
+      sudo -n dnf install -y fzf >/dev/null 2>&1 && { log "fzf installed via dnf."; return 0; } || true
+    fi
+  fi
+
+  # Binary download (no sudo needed): fzf-0.74.5-linux_arm64.tar.gz
+  local arch target_arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64)         target_arch="amd64" ;;
+    aarch64|arm64)  target_arch="arm64" ;;
+    *)              warn "Unsupported architecture for fzf: $arch. Skipping."; return 0 ;;
+  esac
+
+  log "Installing fzf ${FZF_VERSION} from GitHub release"
+  local url="https://github.com/junegunn/fzf/releases/download/v${FZF_VERSION}/fzf-${FZF_VERSION}-linux_${target_arch}.tar.gz"
+  local tmpdir
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/fzf-install.XXXXXX")"
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  download_to "$url" "${tmpdir}/fzf.tar.gz"
+  tar -xzf "${tmpdir}/fzf.tar.gz" -C "$tmpdir"
+
+  mkdir -p "${HOME}/.local/bin"
+  cp "${tmpdir}/fzf" "${HOME}/.local/bin/fzf"
+  chmod +x "${HOME}/.local/bin/fzf"
+
+  rm -rf "$tmpdir"
+  trap - RETURN
+  log "fzf ${FZF_VERSION} installed to ~/.local/bin/"
 }
 
 install_ffmpeg() {
@@ -1072,7 +1128,7 @@ ensure_zsh_exists() {
   fi
 
   # Fallback: extract zsh from Ubuntu .deb packages into ~/.local/
-  if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]]; then
+  if [[ "$(uname -s)" == "Linux" && "$(uname -m)" =~ ^(x86_64|aarch64)$ ]]; then
     _install_zsh_from_deb && return 0
   fi
 
@@ -1102,6 +1158,11 @@ _install_zsh_from_deb() {
 
   local arch="amd64"
   local mirror="http://archive.ubuntu.com/ubuntu"
+  # arm64 debs live on the ports mirror, not archive.ubuntu.com
+  if [[ "$(uname -m)" == "aarch64" ]]; then
+    arch="arm64"
+    mirror="http://ports.ubuntu.com/ubuntu-ports"
+  fi
   local suite="jammy"   # Ubuntu 22.04
   local zsh_deb="zsh_5.8.1-1_${arch}.deb"
   local common_deb="zsh-common_5.8.1-1_all.deb"
@@ -1626,6 +1687,7 @@ run_check_mode() {
     "yazi:yazi"
     "wezterm:wezterm"
     "gh:gh"
+    "fzf:fzf"
   )
 
   for entry in "${checks[@]}"; do
@@ -1811,6 +1873,7 @@ main() {
   install_yazi
   install_wezterm
   install_gh
+  install_fzf
   enable_bash_to_zsh_handoff
   fix_line_endings
 
@@ -1838,6 +1901,7 @@ main() {
   echo "     - yazi --version"
   echo "     - wezterm --version"
   echo "     - gh --version (then: gh auth login)"
+  echo "     - fzf --version"
   echo "  3) If you didn't provide a p10k config, run: p10k configure"
 }
 
